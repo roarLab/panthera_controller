@@ -1,0 +1,22 @@
+<?xml version="1.0"?>
+<package format="2">
+  <name>panthera_controller</name>
+  <version>1.0.0</version>
+  <description>Controller for the Panthera robot</description>
+
+  <maintainer email="mlsdphonethk@gmail.com">Phone Thiha Kyaw</maintainer>
+
+  <license>TODO</license>
+
+  <author email="mlsdphonethk@gmail.com">Phone Thiha Kyaw</author>
+
+  <buildtool_depend>catkin</buildtool_depend>
+
+
+  <depend>controller_interface</depend>
+  <depend>pluginlib</depend>
+
+  <export>
+    <controller_interface plugin="${prefix}/panthera_controller_plugins.xml"/>
+  </export>
+</package>

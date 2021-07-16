@@ -1,0 +1,9 @@
+<library path="lib/libpanthera_controller">
+
+  <class name="panthera_controller/PantheraController" type="panthera_controller::PantheraController" base_class_type="controller_interface::ControllerBase">
+    <description>
+      TODO
+    </description>
+  </class>
+
+</library>
