@@ -8,6 +8,7 @@ endif()
 
 set(${PROJECT_NAME}_CATKIN_DEPS
     controller_interface
+    realtime_tools
     pluginlib
 )
 
@@ -25,6 +26,7 @@ include_directories(
 
 add_library(${PROJECT_NAME} 
     src/panthera_controller.cpp
+    src/speed_limiter.cpp
 )
 target_link_libraries(${PROJECT_NAME} 
     ${catkin_LIBRARIES}
