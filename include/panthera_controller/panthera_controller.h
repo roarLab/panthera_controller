@@ -1,5 +1,6 @@
 #pragma once
 
+#include <angles/angles.h>
 #include <controller_interface/multi_interface_controller.h>
 #include <geometry_msgs/Twist.h>
 #include <hardware_interface/joint_command_interface.h>
@@ -22,6 +23,10 @@ class PantheraController
 
   void update(const ros::Time& time, const ros::Duration& period) override;
 
+  void starting(const ros::Time& time) override;
+
+  void stopping(const ros::Time& /*time*/) override;
+
  private:
   std::string name_;
 
@@ -41,6 +46,25 @@ class PantheraController
   /// Timeout to consider cmd_vel commands old:
   double cmd_vel_timeout_;
 
+  /// Frame to use for the robot base:
+  std::string base_frame_id_;
+
+  /// Wheel separation b (or track width), distance between left and right
+  /// wheels (from the midpoint of the wheel width):
+  double track_width_;
+
+  /// Wheel radius (assuming it's the same for the left and right wheels):
+  double wheel_radius_;
+
+  /// Wheel base a (distance between front and rear wheel):
+  double wheel_base_;
+
+  /// Hardware handles:
+  std::vector<hardware_interface::JointHandle> front_wheel_joints_;
+  std::vector<hardware_interface::JointHandle> rear_wheel_joints_;
+  std::vector<hardware_interface::JointHandle> front_steering_joints_;
+  std::vector<hardware_interface::JointHandle> rear_steering_joints_;
+
   /// Speed limiters:
   Commands last1_cmd_;
   Commands last0_cmd_;
@@ -49,6 +73,12 @@ class PantheraController
   SpeedLimiter limiter_ang_z_;
 
   void cmdVelCallback(const geometry_msgs::Twist& msg);
+  bool getWheelNames(ros::NodeHandle& controller_nh,
+                     const std::string& wheel_param,
+                     std::vector<std::string>& wheel_names);
+
+  void brake();
+  double normalize_angle(double angle);
 };
 
 PLUGINLIB_EXPORT_CLASS(panthera_controller::PantheraController,
