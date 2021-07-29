@@ -233,12 +233,6 @@ void PantheraController::update(const ros::Time &time,
   double new_wheel_angle_rl = std::atan2(vel_y_wheel_rl, vel_x_wheel_rl);
   double new_wheel_angle_rr = std::atan2(vel_y_wheel_rr, vel_x_wheel_rr);
 
-  // get current wheel angles
-  const double curr_wheel_angle_fl = front_steering_joints_[0].getPosition();
-  const double curr_wheel_angle_fr = front_steering_joints_[1].getPosition();
-  const double curr_wheel_angle_rl = rear_steering_joints_[0].getPosition();
-  const double curr_wheel_angle_rr = rear_steering_joints_[1].getPosition();
-
   // need to normalize angles between -90 and 90
   const double new_wheel_angle_fl_normalized =
       normalize_angle(new_wheel_angle_fl);
@@ -274,14 +268,30 @@ void PantheraController::update(const ros::Time &time,
   // steering angles are not too large,
   // if so, we don't rotate wheels
   ///////////////////////////////////////////////////////////////
-  // TODO (phone):
-  //
-  ///////////////////////////////////////////////////////////////
 
-  front_wheel_joints_[0].setCommand(new_wheel_vel_fl / wheel_radius_);
-  front_wheel_joints_[1].setCommand(new_wheel_vel_fr / wheel_radius_);
-  rear_wheel_joints_[0].setCommand(new_wheel_vel_rl / wheel_radius_);
-  rear_wheel_joints_[1].setCommand(new_wheel_vel_rr / wheel_radius_);
+  // get current wheel angles
+  const double curr_wheel_angle_fl = front_steering_joints_[0].getPosition();
+  const double curr_wheel_angle_fr = front_steering_joints_[1].getPosition();
+  const double curr_wheel_angle_rl = rear_steering_joints_[0].getPosition();
+  const double curr_wheel_angle_rr = rear_steering_joints_[1].getPosition();
+
+  // if all the errors are less than aprroximately 10 degree
+  // TODO: this error threshold should be user-defined parameter
+  if (fabs(new_wheel_angle_fl_normalized - curr_wheel_angle_fl) < 0.17 &&
+      fabs(new_wheel_angle_fr_normalized - curr_wheel_angle_fr) < 0.17 &&
+      fabs(new_wheel_angle_rl_normalized - curr_wheel_angle_rl) < 0.17 &&
+      fabs(new_wheel_angle_rr_normalized - curr_wheel_angle_rr) < 0.17) {
+    front_wheel_joints_[0].setCommand(new_wheel_vel_fl / wheel_radius_);
+    front_wheel_joints_[1].setCommand(new_wheel_vel_fr / wheel_radius_);
+    rear_wheel_joints_[0].setCommand(new_wheel_vel_rl / wheel_radius_);
+    rear_wheel_joints_[1].setCommand(new_wheel_vel_rr / wheel_radius_);
+  } else {
+    front_wheel_joints_[0].setCommand(0.0);
+    front_wheel_joints_[1].setCommand(0.0);
+    rear_wheel_joints_[0].setCommand(0.0);
+    rear_wheel_joints_[1].setCommand(0.0);
+  }
+  ///////////////////////////////////////////////////////////////
 }
 
 double PantheraController::normalize_angle(double angle) {
