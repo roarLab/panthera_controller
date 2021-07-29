@@ -2,9 +2,9 @@
 
 #include <angles/angles.h>
 #include <controller_interface/multi_interface_controller.h>
-#include <geometry_msgs/Twist.h>
 #include <hardware_interface/joint_command_interface.h>
 #include <panthera_controller/speed_limiter.h>
+#include <panthera_msgs/TwistWithReconfiguration.h>
 #include <realtime_tools/realtime_buffer.h>
 
 #include <pluginlib/class_list_macros.hpp>
@@ -34,9 +34,17 @@ class PantheraController
     double lin_x;
     double lin_y;
     double ang_z;
+    double left_gait;
+    double right_gait;
     ros::Time stamp;
 
-    Commands() : lin_x(0.0), lin_y(0.0), ang_z(0.0), stamp(0.0) {}
+    Commands()
+        : lin_x(0.0),
+          lin_y(0.0),
+          ang_z(0.0),
+          left_gait(0.0),
+          right_gait(0.0),
+          stamp(0.0) {}
   };
 
   realtime_tools::RealtimeBuffer<Commands> command_;
@@ -64,6 +72,7 @@ class PantheraController
   std::vector<hardware_interface::JointHandle> rear_wheel_joints_;
   std::vector<hardware_interface::JointHandle> front_steering_joints_;
   std::vector<hardware_interface::JointHandle> rear_steering_joints_;
+  std::vector<hardware_interface::JointHandle> reconfiguration_joints_;
 
   /// Speed limiters:
   Commands last1_cmd_;
@@ -72,7 +81,7 @@ class PantheraController
   SpeedLimiter limiter_lin_y_;
   SpeedLimiter limiter_ang_z_;
 
-  void cmdVelCallback(const geometry_msgs::Twist& msg);
+  void cmdVelCallback(const panthera_msgs::TwistWithReconfiguration& msg);
   bool getWheelNames(ros::NodeHandle& controller_nh,
                      const std::string& wheel_param,
                      std::vector<std::string>& wheel_names);

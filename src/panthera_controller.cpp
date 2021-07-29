@@ -57,6 +57,14 @@ bool PantheraController::init(hardware_interface::RobotHW *robot_hw,
     rear_steering_joints_.resize(front_steering_names.size());
   }
 
+  // Get reconfigurable joint names from the parameter server
+  std::vector<std::string> reconfiguration_joint_names;
+  if (!getWheelNames(controller_nh, "reconfiguration",
+                     reconfiguration_joint_names)) {
+    return false;
+  }
+  reconfiguration_joints_.resize(reconfiguration_joint_names.size());
+
   // Twist command related:
   controller_nh.param("cmd_vel_timeout", cmd_vel_timeout_, cmd_vel_timeout_);
   ROS_INFO_STREAM_NAMED(
@@ -169,6 +177,14 @@ bool PantheraController::init(hardware_interface::RobotHW *robot_hw,
         pos_joint_hw->getHandle(rear_steering_names[i]);  // throws on failure
   }
 
+  // Get the reconfiguration joint object to use in the realtime loop
+  for (size_t i = 0; i < reconfiguration_joints_.size(); ++i) {
+    ROS_INFO_STREAM_NAMED(name_, "Adding reconfiguration with joint name: "
+                                     << reconfiguration_joint_names[i]);
+    reconfiguration_joints_[i] = pos_joint_hw->getHandle(
+        reconfiguration_joint_names[i]);  // throws on failure
+  }
+
   sub_command_ = controller_nh.subscribe(
       "cmd_vel", 1, &PantheraController::cmdVelCallback, this);
 
@@ -201,24 +217,34 @@ void PantheraController::update(const ros::Time &time,
   last1_cmd_ = last0_cmd_;
   last0_cmd_ = curr_cmd;
 
-  // find wheel velocities in x and y direction
+  //////////////////////////////////////////////////////////////
   // Note that, track-width currently is fixed but later it'll
   // change based on desired reconfiguration
+  // TODO(phone): Find track width based on current positions of
+  // two gaits of Panthera
+  //
+  const double left_track_width =
+      (track_width_ / 2.0) + fabs(reconfiguration_joints_[0].getPosition());
+  const double right_track_width =
+      (track_width_ / 2.0) + fabs(reconfiguration_joints_[1].getPosition());
+  //////////////////////////////////////////////////////////////
+
+  // find wheel velocities in x and y direction
   const double vel_x_wheel_fl =
-      curr_cmd.lin_x - (curr_cmd.ang_z * track_width_ / 2.0);
+      curr_cmd.lin_x - (curr_cmd.ang_z * left_track_width);
   const double vel_y_wheel_fl =
       curr_cmd.lin_y + (curr_cmd.ang_z * wheel_base_ / 2.0);
   const double vel_x_wheel_fr =
-      curr_cmd.lin_x + (curr_cmd.ang_z * track_width_ / 2.0);
+      curr_cmd.lin_x + (curr_cmd.ang_z * right_track_width);
   const double vel_y_wheel_fr =
       curr_cmd.lin_y + (curr_cmd.ang_z * wheel_base_ / 2.0);
 
   const double vel_x_wheel_rl =
-      curr_cmd.lin_x - (curr_cmd.ang_z * track_width_ / 2.0);
+      curr_cmd.lin_x - (curr_cmd.ang_z * left_track_width);
   const double vel_y_wheel_rl =
       curr_cmd.lin_y - (curr_cmd.ang_z * wheel_base_ / 2.0);
   const double vel_x_wheel_rr =
-      curr_cmd.lin_x + (curr_cmd.ang_z * track_width_ / 2.0);
+      curr_cmd.lin_x + (curr_cmd.ang_z * right_track_width);
   const double vel_y_wheel_rr =
       curr_cmd.lin_y - (curr_cmd.ang_z * wheel_base_ / 2.0);
 
@@ -292,6 +318,11 @@ void PantheraController::update(const ros::Time &time,
     rear_wheel_joints_[1].setCommand(0.0);
   }
   ///////////////////////////////////////////////////////////////
+
+  // apply desired positions to gaits
+  // TODO: make sure cmds are between min and max limits
+  reconfiguration_joints_[0].setCommand(curr_cmd.left_gait);
+  reconfiguration_joints_[1].setCommand(curr_cmd.right_gait);
 }
 
 double PantheraController::normalize_angle(double angle) {
@@ -300,16 +331,22 @@ double PantheraController::normalize_angle(double angle) {
   return result - M_PI_2;
 }
 
-void PantheraController::cmdVelCallback(const geometry_msgs::Twist &msg) {
+void PantheraController::cmdVelCallback(
+    const panthera_msgs::TwistWithReconfiguration &msg) {
   if (isRunning()) {
-    if (std::isnan(msg.linear.x) || std::isnan(msg.linear.y) ||
-        std::isnan(msg.angular.z)) {
-      ROS_WARN("Received NaN in geometry_msgs::Twist. Ignoring command.");
+    if (std::isnan(msg.x) || std::isnan(msg.y) || std::isnan(msg.z) ||
+        std::isnan(msg.left_frame_position) ||
+        std::isnan(msg.right_frame_position)) {
+      ROS_WARN(
+          "Received NaN in panthera_msgs::TwistWithReconfiguration. Ignoring "
+          "command.");
       return;
     }
-    command_struct_.ang_z = msg.angular.z;
-    command_struct_.lin_x = msg.linear.x;
-    command_struct_.lin_y = msg.linear.y;
+    command_struct_.ang_z = msg.z;
+    command_struct_.lin_x = msg.x;
+    command_struct_.lin_y = msg.y;
+    command_struct_.left_gait = msg.left_frame_position;
+    command_struct_.right_gait = msg.right_frame_position;
     command_struct_.stamp = ros::Time::now();
     command_.writeFromNonRT(command_struct_);
     ROS_DEBUG_STREAM_NAMED(name_,
