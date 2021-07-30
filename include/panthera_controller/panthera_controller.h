@@ -3,9 +3,12 @@
 #include <angles/angles.h>
 #include <controller_interface/multi_interface_controller.h>
 #include <hardware_interface/joint_command_interface.h>
+#include <nav_msgs/Odometry.h>
 #include <panthera_controller/speed_limiter.h>
 #include <panthera_msgs/TwistWithReconfiguration.h>
 #include <realtime_tools/realtime_buffer.h>
+#include <realtime_tools/realtime_publisher.h>
+#include <tf/tfMessage.h>
 
 #include <pluginlib/class_list_macros.hpp>
 
@@ -29,6 +32,15 @@ class PantheraController
 
  private:
   std::string name_;
+
+  ros::Duration publish_period_;
+  ros::Time last_state_publish_time_;
+  ros::Time last_odom_update_timestamp_;
+
+  /// Current pose:
+  double x_;        //   [m]
+  double y_;        //   [m]
+  double heading_;  // [rad]
 
   struct Commands {
     double lin_x;
@@ -66,6 +78,11 @@ class PantheraController
 
   /// Wheel base a (distance between front and rear wheel):
   double wheel_base_;
+
+  // odometry related
+  std::string odom_frame_id_;
+  std::shared_ptr<realtime_tools::RealtimePublisher<nav_msgs::Odometry> >
+      odom_pub_;
 
   /// Hardware handles:
   std::vector<hardware_interface::JointHandle> front_wheel_joints_;

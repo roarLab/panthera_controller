@@ -10,7 +10,9 @@ set(${PROJECT_NAME}_CATKIN_DEPS
     controller_interface
     realtime_tools
     pluginlib
+    nav_msgs
     panthera_msgs
+    tf
 )
 
 find_package(catkin REQUIRED COMPONENTS ${${PROJECT_NAME}_CATKIN_DEPS})

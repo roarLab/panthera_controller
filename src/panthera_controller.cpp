@@ -1,8 +1,15 @@
 #include <panthera_controller/panthera_controller.h>
+#include <tf/transform_datatypes.h>
 
 namespace panthera_controller {
 PantheraController::PantheraController()
-    : command_struct_(), cmd_vel_timeout_(0.5) {}
+    : x_(0.0),
+      y_(0.0),
+      heading_(0.0),
+      command_struct_(),
+      cmd_vel_timeout_(0.5),
+      base_frame_id_("base_link"),
+      odom_frame_id_("odom") {}
 
 bool PantheraController::init(hardware_interface::RobotHW *robot_hw,
                               ros::NodeHandle &root_nh,
@@ -65,6 +72,13 @@ bool PantheraController::init(hardware_interface::RobotHW *robot_hw,
   }
   reconfiguration_joints_.resize(reconfiguration_joint_names.size());
 
+  // Odometry related
+  double publish_rate;
+  controller_nh.param("publish_rate", publish_rate, 50.0);
+  ROS_INFO_STREAM_NAMED(
+      name_, "Controller state will be published at " << publish_rate << "Hz.");
+  publish_period_ = ros::Duration(1.0 / publish_rate);
+
   // Twist command related:
   controller_nh.param("cmd_vel_timeout", cmd_vel_timeout_, cmd_vel_timeout_);
   ROS_INFO_STREAM_NAMED(
@@ -73,6 +87,9 @@ bool PantheraController::init(hardware_interface::RobotHW *robot_hw,
 
   controller_nh.param("base_frame_id", base_frame_id_, base_frame_id_);
   ROS_INFO_STREAM_NAMED(name_, "Base frame_id set to " << base_frame_id_);
+
+  controller_nh.param("odom_frame_id", odom_frame_id_, odom_frame_id_);
+  ROS_INFO_STREAM_NAMED(name_, "Odometry frame_id set to " << odom_frame_id_);
 
   // Velocity and acceleration limits:
   controller_nh.param("linear/x/has_velocity_limits",
@@ -188,11 +205,126 @@ bool PantheraController::init(hardware_interface::RobotHW *robot_hw,
   sub_command_ = controller_nh.subscribe(
       "cmd_vel", 1, &PantheraController::cmdVelCallback, this);
 
+  // odometry related
+  odom_pub_.reset(new realtime_tools::RealtimePublisher<nav_msgs::Odometry>(
+      controller_nh, "odom", 100));
+  odom_pub_->msg_.header.frame_id = odom_frame_id_;
+  odom_pub_->msg_.child_frame_id = base_frame_id_;
+
   return true;
 }
 
 void PantheraController::update(const ros::Time &time,
                                 const ros::Duration &period) {
+  // CALCULATE ODOMETRY
+
+  // read steering angle and velocity of each wheel
+  const double curr_wheel_angle_fl = front_steering_joints_[0].getPosition();
+  const double curr_wheel_angle_fr = front_steering_joints_[1].getPosition();
+  const double curr_wheel_angle_rl = rear_steering_joints_[0].getPosition();
+  const double curr_wheel_angle_rr = rear_steering_joints_[1].getPosition();
+  const double curr_wheel_vel_fl =
+      front_wheel_joints_[0].getVelocity() * wheel_radius_;
+  const double curr_wheel_vel_fr =
+      front_wheel_joints_[1].getVelocity() * wheel_radius_;
+  const double curr_wheel_vel_rl =
+      rear_wheel_joints_[0].getVelocity() * wheel_radius_;
+  const double curr_wheel_vel_rr =
+      rear_wheel_joints_[1].getVelocity() * wheel_radius_;
+
+  // calculate x and y components of linear velocity in robot base_frame
+  const double vx = (std::cos(curr_wheel_angle_fl) * curr_wheel_vel_fl +
+                     std::cos(curr_wheel_angle_fr) * curr_wheel_vel_fr +
+                     std::cos(curr_wheel_angle_rr) * curr_wheel_vel_rr +
+                     std::cos(curr_wheel_angle_rl) * curr_wheel_vel_rl) /
+                    4.0;
+  const double vy = (std::sin(curr_wheel_angle_fl) * curr_wheel_vel_fl +
+                     std::sin(curr_wheel_angle_fr) * curr_wheel_vel_fr +
+                     std::sin(curr_wheel_angle_rr) * curr_wheel_vel_rr +
+                     std::sin(curr_wheel_angle_rl) * curr_wheel_vel_rl) /
+                    4.0;
+
+  // all the notations are based on the panthera's kinematics paper
+  // fl: front-left, fr: front-right
+  // rl: rear-left , rr: rear-right
+
+  // The position of the four steering units in the robot coordinate frame
+  // [fl] (x1, y1) = (a, b)
+  // [fr] (x2, y2) = (a, -b)
+  // [rr] (x3, y3) = (-a, -b)
+  // [rl] (x4, y4) = (-a, b)
+
+  const double a = wheel_base_ / 2.0;
+
+  // two different b(s) since the robot has two independent gaits
+  // b_left includes wheel no: 1 & 4
+  const double b_left =
+      (track_width_ / 2.0) + fabs(reconfiguration_joints_[0].getPosition());
+  // b_right includes wheel no: 2 & 3
+  const double b_right =
+      (track_width_ / 2.0) + fabs(reconfiguration_joints_[1].getPosition());
+
+  // find const k
+  // here also two constants k for left and right
+  const double k_left = 4.0 * (a * a + b_left * b_left);
+  const double k_right = 4.0 * (a * a + b_right * b_right);
+
+  // calculate p_i according to paper
+  const double p_1 = (-b_left * std::cos(curr_wheel_angle_fl) +
+                      a * std::sin(curr_wheel_angle_fl)) /
+                     k_left;
+  const double p_2 = (b_right * std::cos(curr_wheel_angle_fr) +
+                      a * std::sin(curr_wheel_angle_fr)) /
+                     k_right;
+  const double p_3 = (b_right * std::cos(curr_wheel_angle_rr) -
+                      a * std::sin(curr_wheel_angle_rr)) /
+                     k_right;
+  const double p_4 = (-b_left * std::cos(curr_wheel_angle_rl) -
+                      a * std::sin(curr_wheel_angle_rl)) /
+                     k_left;
+
+  // now find z component of angular velocity in robot base_frame
+  const double vth = p_1 * curr_wheel_vel_fl + p_2 * curr_wheel_vel_fr +
+                     p_3 * curr_wheel_vel_rr + p_4 * curr_wheel_vel_rl;
+
+  // compute odometry of the robot using above calculated velocities
+  const double odom_dt = (time - last_odom_update_timestamp_).toSec();
+  last_odom_update_timestamp_ = time;
+
+  double delta_x = (vx * cos(heading_) - vy * sin(heading_)) * odom_dt;
+  double delta_y = (vx * sin(heading_) + vy * cos(heading_)) * odom_dt;
+  double delta_th = vth * odom_dt;
+
+  x_ += delta_x;
+  y_ += delta_y;
+  heading_ += delta_th;
+
+  // Publish odometry message
+  if (last_state_publish_time_ + publish_period_ < time) {
+    last_state_publish_time_ += publish_period_;
+    // Compute and store orientation info
+    const geometry_msgs::Quaternion orientation(
+        tf::createQuaternionMsgFromYaw(heading_));
+
+    // Populate odom message and publish
+    if (odom_pub_->trylock()) {
+      odom_pub_->msg_.header.stamp = time;
+      odom_pub_->msg_.pose.pose.position.x = x_;
+      odom_pub_->msg_.pose.pose.position.y = y_;
+      odom_pub_->msg_.pose.pose.position.z = 0.0;
+      odom_pub_->msg_.pose.pose.orientation = orientation;
+      odom_pub_->msg_.twist.twist.linear.x = vx;
+      odom_pub_->msg_.twist.twist.linear.y = vy;
+      odom_pub_->msg_.twist.twist.angular.z = vth;
+      odom_pub_->unlockAndPublish();
+    }
+
+    ///////////////////////////////////////////////////////
+    // TODO: publish robot configuration state message
+    // with reconfiguration
+    ///////////////////////////////////////////////////////
+  }
+
   // MOVE ROBOT
   // Retreive current velocity command and time step
   Commands curr_cmd = *(command_.readFromRT());
@@ -217,36 +349,16 @@ void PantheraController::update(const ros::Time &time,
   last1_cmd_ = last0_cmd_;
   last0_cmd_ = curr_cmd;
 
-  //////////////////////////////////////////////////////////////
-  // Note that, track-width currently is fixed but later it'll
-  // change based on desired reconfiguration
-  // TODO(phone): Find track width based on current positions of
-  // two gaits of Panthera
-  //
-  const double left_track_width =
-      (track_width_ / 2.0) + fabs(reconfiguration_joints_[0].getPosition());
-  const double right_track_width =
-      (track_width_ / 2.0) + fabs(reconfiguration_joints_[1].getPosition());
-  //////////////////////////////////////////////////////////////
-
   // find wheel velocities in x and y direction
-  const double vel_x_wheel_fl =
-      curr_cmd.lin_x - (curr_cmd.ang_z * left_track_width);
-  const double vel_y_wheel_fl =
-      curr_cmd.lin_y + (curr_cmd.ang_z * wheel_base_ / 2.0);
-  const double vel_x_wheel_fr =
-      curr_cmd.lin_x + (curr_cmd.ang_z * right_track_width);
-  const double vel_y_wheel_fr =
-      curr_cmd.lin_y + (curr_cmd.ang_z * wheel_base_ / 2.0);
+  const double vel_x_wheel_fl = curr_cmd.lin_x - (curr_cmd.ang_z * b_left);
+  const double vel_y_wheel_fl = curr_cmd.lin_y + (curr_cmd.ang_z * a);
+  const double vel_x_wheel_fr = curr_cmd.lin_x + (curr_cmd.ang_z * b_right);
+  const double vel_y_wheel_fr = curr_cmd.lin_y + (curr_cmd.ang_z * a);
 
-  const double vel_x_wheel_rl =
-      curr_cmd.lin_x - (curr_cmd.ang_z * left_track_width);
-  const double vel_y_wheel_rl =
-      curr_cmd.lin_y - (curr_cmd.ang_z * wheel_base_ / 2.0);
-  const double vel_x_wheel_rr =
-      curr_cmd.lin_x + (curr_cmd.ang_z * right_track_width);
-  const double vel_y_wheel_rr =
-      curr_cmd.lin_y - (curr_cmd.ang_z * wheel_base_ / 2.0);
+  const double vel_x_wheel_rl = curr_cmd.lin_x - (curr_cmd.ang_z * b_left);
+  const double vel_y_wheel_rl = curr_cmd.lin_y - (curr_cmd.ang_z * a);
+  const double vel_x_wheel_rr = curr_cmd.lin_x + (curr_cmd.ang_z * b_right);
+  const double vel_y_wheel_rr = curr_cmd.lin_y - (curr_cmd.ang_z * a);
 
   // Now, find new wheel velocity
   double new_wheel_vel_fl = std::hypot(vel_x_wheel_fl, vel_y_wheel_fl);
@@ -294,12 +406,6 @@ void PantheraController::update(const ros::Time &time,
   // steering angles are not too large,
   // if so, we don't rotate wheels
   ///////////////////////////////////////////////////////////////
-
-  // get current wheel angles
-  const double curr_wheel_angle_fl = front_steering_joints_[0].getPosition();
-  const double curr_wheel_angle_fr = front_steering_joints_[1].getPosition();
-  const double curr_wheel_angle_rl = rear_steering_joints_[0].getPosition();
-  const double curr_wheel_angle_rr = rear_steering_joints_[1].getPosition();
 
   // if all the errors are less than aprroximately 10 degree
   // TODO: this error threshold should be user-defined parameter
@@ -365,7 +471,8 @@ void PantheraController::starting(const ros::Time &time) {
   brake();
 
   // Register starting time used to keep fixed rate
-  // last_state_publish_time_ = time;
+  last_state_publish_time_ = time;
+  last_odom_update_timestamp_ = time;
 }
 
 void PantheraController::stopping(const ros::Time & /*time*/) { brake(); }
