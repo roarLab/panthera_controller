@@ -9,7 +9,8 @@ PantheraController::PantheraController()
       command_struct_(),
       cmd_vel_timeout_(0.5),
       base_frame_id_("base_link"),
-      odom_frame_id_("odom") {}
+      odom_frame_id_("odom"),
+      state_frame_id_("state") {}
 
 bool PantheraController::init(hardware_interface::RobotHW *robot_hw,
                               ros::NodeHandle &root_nh,
@@ -91,6 +92,9 @@ bool PantheraController::init(hardware_interface::RobotHW *robot_hw,
   controller_nh.param("odom_frame_id", odom_frame_id_, odom_frame_id_);
   ROS_INFO_STREAM_NAMED(name_, "Odometry frame_id set to " << odom_frame_id_);
 
+  controller_nh.param("state_frame_id", state_frame_id_, state_frame_id_);
+  ROS_INFO_STREAM_NAMED(name_, "State frame_id set to " << state_frame_id_);
+
   // Velocity and acceleration limits:
   controller_nh.param("linear/x/has_velocity_limits",
                       limiter_lin_x_.has_velocity_limits,
@@ -157,8 +161,6 @@ bool PantheraController::init(hardware_interface::RobotHW *robot_hw,
                       limiter_ang_z_.min_acceleration,
                       -limiter_ang_z_.max_acceleration);
 
-  // If either parameter is not available, we need to look up the value in the
-  // URDF
   bool lookup_track_width =
       !controller_nh.getParam("track_width", track_width_);
   bool lookup_wheel_base = !controller_nh.getParam("wheel_base", wheel_base_);
@@ -210,6 +212,14 @@ bool PantheraController::init(hardware_interface::RobotHW *robot_hw,
       controller_nh, "odom", 100));
   odom_pub_->msg_.header.frame_id = odom_frame_id_;
   odom_pub_->msg_.child_frame_id = base_frame_id_;
+
+  state_pub_.reset(new realtime_tools::RealtimePublisher<msrr_msgs::State>(
+      controller_nh, "state", 100));
+  state_pub_->msg_.header.frame_id = state_frame_id_;
+  state_pub_->msg_.joint_state.name.push_back(
+      reconfiguration_joints_[0].getName());
+  state_pub_->msg_.joint_state.name.push_back(
+      reconfiguration_joints_[1].getName());
 
   return true;
 }
@@ -319,10 +329,23 @@ void PantheraController::update(const ros::Time &time,
       odom_pub_->unlockAndPublish();
     }
 
-    ///////////////////////////////////////////////////////
-    // TODO: publish robot configuration state message
-    // with reconfiguration
-    ///////////////////////////////////////////////////////
+    if (state_pub_->trylock()) {
+      state_pub_->msg_.header.stamp = time;
+      state_pub_->msg_.pose.position.x = x_;
+      state_pub_->msg_.pose.position.y = y_;
+      state_pub_->msg_.pose.position.z = 0.0;
+      state_pub_->msg_.pose.orientation = orientation;
+      state_pub_->msg_.twist.linear.x = vx;
+      state_pub_->msg_.twist.linear.y = vy;
+      state_pub_->msg_.twist.angular.z = vth;
+
+      state_pub_->msg_.joint_state.header.stamp = time;
+      for (size_t i = 0; i < reconfiguration_joints_.size(); ++i) {
+        state_pub_->msg_.joint_state.position[i] =
+            reconfiguration_joints_[1].getPosition();
+      }
+      state_pub_->unlockAndPublish();
+    }
   }
 
   // MOVE ROBOT
