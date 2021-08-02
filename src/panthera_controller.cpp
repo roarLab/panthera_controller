@@ -220,6 +220,7 @@ bool PantheraController::init(hardware_interface::RobotHW *robot_hw,
       reconfiguration_joints_[0].getName());
   state_pub_->msg_.joint_state.name.push_back(
       reconfiguration_joints_[1].getName());
+  state_pub_->msg_.joint_state.position.resize(reconfiguration_joints_.size());
 
   return true;
 }
@@ -342,7 +343,7 @@ void PantheraController::update(const ros::Time &time,
       state_pub_->msg_.joint_state.header.stamp = time;
       for (size_t i = 0; i < reconfiguration_joints_.size(); ++i) {
         state_pub_->msg_.joint_state.position[i] =
-            reconfiguration_joints_[1].getPosition();
+            reconfiguration_joints_[i].getPosition();
       }
       state_pub_->unlockAndPublish();
     }
