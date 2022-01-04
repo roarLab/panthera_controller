@@ -14,7 +14,6 @@ ROS Controller for Panthera, which is a four-wheeled independent steering drive 
 ## Dependencies
 
 - [panthera_msgs](https://github.com/roarLab/panthera_msgs)
-- [psrr_msgs](https://github.com/roarLab/psrr)
 
 ## Subscribed Topics
 
@@ -26,5 +25,5 @@ cmd_vel (panthera_msgs/TwistWithReconfiguration)
 odom (nav_msgs/Odometry)
 : Odometry of the robot
 
-state (psrr_msgs/State)
+state (panthera_msgs/State)
 : n-dimensional state of the self-reconfigurable robot
