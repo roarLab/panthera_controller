@@ -213,7 +213,7 @@ bool PantheraController::init(hardware_interface::RobotHW *robot_hw,
   odom_pub_->msg_.header.frame_id = odom_frame_id_;
   odom_pub_->msg_.child_frame_id = base_frame_id_;
 
-  state_pub_.reset(new realtime_tools::RealtimePublisher<psrr_msgs::State>(
+  state_pub_.reset(new realtime_tools::RealtimePublisher<panthera_msgs::State>(
       controller_nh, "state", 100));
   state_pub_->msg_.header.frame_id = state_frame_id_;
   state_pub_->msg_.joint_state.name.push_back(

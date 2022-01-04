@@ -12,7 +12,6 @@ set(${PROJECT_NAME}_CATKIN_DEPS
     pluginlib
     nav_msgs
     panthera_msgs
-    psrr_msgs
     tf
 )
 

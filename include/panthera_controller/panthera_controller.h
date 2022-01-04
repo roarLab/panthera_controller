@@ -5,8 +5,8 @@
 #include <hardware_interface/joint_command_interface.h>
 #include <nav_msgs/Odometry.h>
 #include <panthera_controller/speed_limiter.h>
+#include <panthera_msgs/State.h>
 #include <panthera_msgs/TwistWithReconfiguration.h>
-#include <psrr_msgs/State.h>
 #include <realtime_tools/realtime_buffer.h>
 #include <realtime_tools/realtime_publisher.h>
 #include <tf/tfMessage.h>
@@ -85,7 +85,7 @@ class PantheraController
   std::string state_frame_id_;
   std::shared_ptr<realtime_tools::RealtimePublisher<nav_msgs::Odometry> >
       odom_pub_;
-  std::shared_ptr<realtime_tools::RealtimePublisher<psrr_msgs::State> >
+  std::shared_ptr<realtime_tools::RealtimePublisher<panthera_msgs::State> >
       state_pub_;
 
   /// Hardware handles:
